@@ -33,7 +33,7 @@ echo === Creando runtime con jlink ===
 rmdir /s /q runtime 2>nul
 "%JAVA_HOME%\bin\jlink.exe" ^
   --module-path "%FXJMODS%;%JAVA_HOME%\jmods" ^
-  --add-modules java.base,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,jdk.crypto.mscapi,jdk.crypto.cryptoki ^
+  --add-modules java.base,java.desktop,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,javafx.swing,jdk.crypto.mscapi,jdk.crypto.cryptoki ^
   --strip-debug --no-header-files --no-man-pages ^
   --output runtime || (echo [ERROR] Fallo jlink & exit /b 1)
 

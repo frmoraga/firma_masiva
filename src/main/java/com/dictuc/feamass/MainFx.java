@@ -20,7 +20,6 @@ import javafx.stage.StageStyle;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Objects;
 
 public class MainFx extends Application {
 
@@ -36,6 +35,7 @@ public class MainFx extends Application {
 
     private ComboBox<CertInfo> cboCerts;
     private Button btnRefreshCerts;
+    private Label lblCertWarning;
 
     private TextArea log;
     private ProgressBar progressBar; // para mostrar progreso en firma / refresh
@@ -61,25 +61,32 @@ public class MainFx extends Application {
     private void showSplashAndScan(Stage stage) {
         // UI de splash
         var root = new BorderPane();
+        root.getStyleClass().add("root");
         root.setPadding(new Insets(24));
 
         var title = new Label("Inicializando…");
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+        title.getStyleClass().add("titulo-seccion");
 
         var msg = new Label("Buscando certificados (Windows / Token)…");
+        msg.getStyleClass().add("subtitulo");
         msg.setWrapText(true);
 
         var spinner = new ProgressIndicator();
         spinner.setPrefSize(48, 48);
 
-        var box = new VBox(12, title, msg, spinner);
-        box.setAlignment(Pos.CENTER);
+        var card = new VBox(14, title, msg, spinner);
+        card.getStyleClass().add("card");
+        card.setAlignment(Pos.CENTER);
+        card.setMaxWidth(360);
+        card.setMaxHeight(VBox.USE_PREF_SIZE);
 
+        var box = new StackPane(card);
         root.setCenter(box);
 
 		stage.setResizable(false);
 
         var scene = new Scene(root, 640, 360);
+        AppTheme.apply(scene);
         stage.setScene(scene);
         stage.initStyle(StageStyle.DECORATED);
         loadWindowIcons(stage);
@@ -121,21 +128,25 @@ public class MainFx extends Application {
         txtInput = new TextField();
         txtInput.setPromptText("Archivo PDF o ZIP a firmar…");
         txtInput.setPrefColumnCount(40);
+        HBox.setHgrow(txtInput, Priority.ALWAYS);
 
         btnBrowseIn = new Button("Examinar…");
+        btnBrowseIn.getStyleClass().add("button-secundario");
         btnBrowseIn.setOnAction(e -> chooseInput());
 
         txtOutput = new TextField();
         txtOutput.setPromptText("Archivo de salida (se sugiere automáticamente)…");
         txtOutput.setPrefColumnCount(40);
+        HBox.setHgrow(txtOutput, Priority.ALWAYS);
 
         btnBrowseOut = new Button("Destino…");
+        btnBrowseOut.getStyleClass().add("button-secundario");
         btnBrowseOut.setOnAction(e -> chooseOutput());
 
-        HBox rowIn = new HBox(10, new Label("Entrada:"), txtInput, btnBrowseIn);
+        HBox rowIn = new HBox(10, AppTheme.etiqueta("Entrada:"), txtInput, btnBrowseIn);
         rowIn.setAlignment(Pos.CENTER_LEFT);
 
-        HBox rowOut = new HBox(10, new Label("Salida:"), txtOutput, btnBrowseOut);
+        HBox rowOut = new HBox(10, AppTheme.etiqueta("Salida:"), txtOutput, btnBrowseOut);
         rowOut.setAlignment(Pos.CENTER_LEFT);
 
         // ======= Modo (PDF único o ZIP) =======
@@ -146,58 +157,92 @@ public class MainFx extends Application {
         rbPdf.setToggleGroup(tg);
         rbZip.setToggleGroup(tg);
 
-        HBox rowMode = new HBox(20, new Label("Modo:"), rbPdf, rbZip);
+        HBox rowMode = new HBox(20, AppTheme.etiqueta("Modo:"), rbPdf, rbZip);
         rowMode.setAlignment(Pos.CENTER_LEFT);
+
+        VBox cardDocumento = new VBox(12,
+                AppTheme.tituloSeccion("Documento a firmar"),
+                rowMode, rowIn, rowOut);
+        cardDocumento.getStyleClass().add("card");
 
         // ======= Certificados =======
         cboCerts = new ComboBox<>();
         cboCerts.setPrefWidth(600);
         cboCerts.setPromptText("Seleccione un certificado…");
+        HBox.setHgrow(cboCerts, Priority.ALWAYS);
+
+        lblCertWarning = new Label();
+        lblCertWarning.getStyleClass().add("texto-error");
+        lblCertWarning.setWrapText(true);
+        lblCertWarning.setVisible(false);
+        lblCertWarning.setManaged(false);
 
         if (initialCerts != null) {
             cboCerts.setItems(FXCollections.observableArrayList(initialCerts));
             if (!initialCerts.isEmpty()) cboCerts.getSelectionModel().select(0);
         }
+        cboCerts.getSelectionModel().selectedItemProperty().addListener(
+                (obs, old, sel) -> actualizarAvisoCertificado(sel));
+        actualizarAvisoCertificado(cboCerts.getSelectionModel().getSelectedItem());
 
         btnRefreshCerts = new Button("Detectar certificados");
+        btnRefreshCerts.getStyleClass().add("button-secundario");
         btnRefreshCerts.setOnAction(e -> refreshCertsAsync());
 
-        HBox rowCert = new HBox(10, new Label("Certificado:"), cboCerts, btnRefreshCerts);
+        HBox rowCert = new HBox(10, AppTheme.etiqueta("Certificado:"), cboCerts, btnRefreshCerts);
         rowCert.setAlignment(Pos.CENTER_LEFT);
 
-        // ======= Log + acciones =======
+        VBox cardCertificado = new VBox(12,
+                AppTheme.tituloSeccion("Certificado de firma"),
+                rowCert, lblCertWarning);
+        cardCertificado.getStyleClass().add("card");
+
+        // ======= Log =======
         log = new TextArea();
         log.setEditable(false);
-        log.setPrefRowCount(12);
+        log.setPrefRowCount(10);
+        VBox.setVgrow(log, Priority.ALWAYS);
 
+        VBox cardLog = new VBox(10, AppTheme.tituloSeccion("Registro de actividad"), log);
+        cardLog.getStyleClass().add("card");
+        VBox.setVgrow(cardLog, Priority.ALWAYS);
+
+        // ======= Acciones =======
         btnSign = new Button("Firmar");
+        btnSign.getStyleClass().add("button-primario");
         btnSign.setDefaultButton(true);
         btnSign.setOnAction(e -> onSign());
+        actualizarAvisoCertificado(cboCerts.getSelectionModel().getSelectedItem());
+
+        Button btnXnet = new Button("Firmar vía XNET…");
+        btnXnet.getStyleClass().add("button-secundario");
+        btnXnet.setOnAction(e -> new com.dictuc.feamass.xnet.ui.XnetFlow(stage, cachedCerts).start());
 
         Button btnExit = new Button("Salir");
+        btnExit.getStyleClass().add("button-fantasma");
         btnExit.setOnAction(e -> Platform.exit());
 
         progressBar = new ProgressBar(0);
         progressBar.setMaxWidth(Double.MAX_VALUE);
 		HBox.setHgrow(progressBar, Priority.ALWAYS);
 
-        HBox rowActions = new HBox(10, progressBar, btnSign, btnExit);
+        HBox rowActions = new HBox(10, progressBar, btnExit, btnXnet, btnSign);
         rowActions.setAlignment(Pos.CENTER_RIGHT);
 
-        // ======= Layout raíz =======
-        VBox root = new VBox(12,
-                rowMode,
-                rowIn,
-                rowOut,
-                new Separator(),
-                rowCert,
-                new Label("Registro:"),
-                log,
-                rowActions
-        );
-        root.setPadding(new Insets(14));
+        // ======= Encabezado =======
+        HBox header = AppTheme.header("Firma Masiva", "Dictuc · Firma Electrónica Avanzada");
 
-        Scene scene = new Scene(root, 920, 540);
+        // ======= Layout raíz =======
+        VBox body = new VBox(16, cardDocumento, cardCertificado, cardLog, rowActions);
+        body.setPadding(new Insets(20));
+        VBox.setVgrow(body, Priority.ALWAYS);
+
+        BorderPane root = new BorderPane();
+        root.setTop(header);
+        root.setCenter(body);
+
+        Scene scene = new Scene(root, 960, 640);
+        AppTheme.apply(scene);
         stage.setScene(scene);
         stage.setTitle("Dictuc - Firma Masiva");
         stage.show();
@@ -287,6 +332,19 @@ public class MainFx extends Application {
             appendLog("[ERROR] Debes seleccionar un certificado.");
             return;
         }
+        if (!sel.esValido()) {
+            appendLog("[ERROR] Certificado no utilizable: " + sel.validacion.motivo);
+            return;
+        }
+
+        String resumen = rbPdf.isSelected()
+                ? "Vas a firmar el PDF:\n" + in.getName()
+                : "Vas a firmar los PDFs contenidos en el ZIP:\n" + in.getName();
+        boolean confirmado = AppTheme.confirmar(resumen + "\n\nCertificado: " + sel + "\n\n¿Confirmas la firma?");
+        if (!confirmado) {
+            appendLog("[*] Firma cancelada por el usuario.");
+            return;
+        }
 
         // Firma en 2do plano para no congelar UI
         Task<Void> signTask = new Task<>() {
@@ -301,10 +359,12 @@ public class MainFx extends Application {
                         appendLog("[*] Firmando PDF único…");
                         PdfSigner.signSingle(in, out, kc);
                         appendLog("[OK] PDF firmado: " + out.getAbsolutePath());
+                        ActivityLog.registrar("Firma local OK pdf=" + in.getName() + " cert=" + sel.alias);
                     } else {
                         appendLog("[*] Firmando ZIP (solo PDFs, conservando el mismo nombre)…");
                         PdfSigner.signZip(in, out, kc);
                         appendLog("[OK] ZIP firmado: " + out.getAbsolutePath());
+                        ActivityLog.registrar("Firma local OK zip=" + in.getName() + " cert=" + sel.alias);
                     }
                 } finally {
                     updateProgress(0, 1);
@@ -324,6 +384,8 @@ public class MainFx extends Application {
             progressBar.progressProperty().unbind();
             progressBar.setProgress(0);
             var ex = signTask.getException();
+            ActivityLog.registrar("Firma local ERROR entrada=" + in.getName() + " cert=" + sel.alias
+                    + " " + (ex != null ? ex.getMessage() : ""));
             alert(Alert.AlertType.ERROR, "Error al firmar: " + (ex != null ? ex.getMessage() : "desconocido"));
             if (ex != null) ex.printStackTrace();
         });
@@ -365,6 +427,17 @@ public class MainFx extends Application {
     }
 
     // ---------- Utilidades ----------
+    private void actualizarAvisoCertificado(CertInfo sel) {
+        if (lblCertWarning == null) return;
+        boolean mostrar = sel != null && !sel.esValido();
+        lblCertWarning.setText(mostrar ? "Este certificado no se puede usar para firmar: " + sel.validacion.motivo : "");
+        lblCertWarning.setVisible(mostrar);
+        lblCertWarning.setManaged(mostrar);
+        if (btnSign != null) {
+            btnSign.setDisable(sel == null || !sel.esValido());
+        }
+    }
+
     private void appendLog(String s) {
         if (log == null) return;
         if (Platform.isFxApplicationThread()) {
@@ -379,6 +452,7 @@ public class MainFx extends Application {
 			Alert alert = new Alert(type, msg, ButtonType.OK);
 			alert.setTitle("Dictuc - Firma Masiva");
 			alert.setHeaderText(null); // sin cabecera, solo mensaje
+			AppTheme.apply(alert.getDialogPane().getScene());
 
 			// Agregar icono (igual que el de la app principal)
 			Stage alertStage = (Stage) alert.getDialogPane().getScene().getWindow();

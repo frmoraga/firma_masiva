@@ -1,6 +1,11 @@
 package com.dictuc.feamass;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.ExternalSigningSupport;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 
@@ -27,6 +32,45 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 public final class PdfSigner {
+
+    /** Posicion del sello visual (imagen de firma) sobre la pagina. */
+    public enum PosicionSello {
+        SUPERIOR_IZQUIERDA("Arriba - izquierda"),
+        SUPERIOR_CENTRO("Arriba - centro"),
+        SUPERIOR_DERECHA("Arriba - derecha"),
+        INFERIOR_IZQUIERDA("Abajo - izquierda"),
+        INFERIOR_CENTRO("Abajo - centro"),
+        INFERIOR_DERECHA("Abajo - derecha");
+
+        private final String etiqueta;
+
+        PosicionSello(String etiqueta) {
+            this.etiqueta = etiqueta;
+        }
+
+        @Override
+        public String toString() {
+            return etiqueta;
+        }
+    }
+
+    /**
+     * Sello visual (imagen de la firma + texto) a estampar sobre la pagina antes de firmar.
+     * No reemplaza la firma criptografica PKCS#7: es un agregado visual sobre el mismo documento.
+     */
+    public static final class SelloVisual {
+        public final byte[] imagen; // PNG o JPG
+        public final String etiqueta; // ej. "Juan Perez - 06-07-2026 15:32"
+        public final PosicionSello posicion;
+        public final int pagina; // 0-based; -1 = ultima pagina
+
+        public SelloVisual(byte[] imagen, String etiqueta, PosicionSello posicion, int pagina) {
+            this.imagen = imagen;
+            this.etiqueta = etiqueta;
+            this.posicion = posicion;
+            this.pagina = pagina;
+        }
+    }
 
     /** Firma un PDF de forma incremental y genera PKCS#7 detached, desde archivo a archivo. */
     public static void signSingle(File inputPdf, File outputPdf, KeyAndCert kc) throws Exception {
@@ -126,11 +170,79 @@ public final class PdfSigner {
     }
 
     /** Firma un PDF recibido como bytes y devuelve los bytes firmados (incremental, detached). */
-    private static byte[] signToBytes(byte[] inputPdf, KeyAndCert kc) throws Exception {
+    public static byte[] signToBytes(byte[] inputPdf, KeyAndCert kc) throws Exception {
+        return signToBytes(inputPdf, kc, null);
+    }
+
+    /** Igual que signToBytes(byte[], KeyAndCert), pero estampando antes un sello visual (opcional). */
+    public static byte[] signToBytes(byte[] inputPdf, KeyAndCert kc, SelloVisual sello) throws Exception {
         try (PDDocument doc = PDDocument.load(new ByteArrayInputStream(inputPdf));
              ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64_000, inputPdf.length + 8_000))) {
+            if (sello != null) {
+                aplicarSelloVisual(doc, sello);
+            }
             signIntoStream(doc, out, kc);
             return out.toByteArray();
+        }
+    }
+
+    /** Dibuja la imagen de firma + etiqueta sobre la pagina indicada, antes de firmar. */
+    private static void aplicarSelloVisual(PDDocument doc, SelloVisual sello) throws IOException {
+        int totalPaginas = doc.getNumberOfPages();
+        if (totalPaginas == 0) return;
+        int idx = sello.pagina < 0 ? totalPaginas - 1 : Math.min(sello.pagina, totalPaginas - 1);
+        PDPage page = doc.getPage(idx);
+        PDRectangle box = page.getMediaBox();
+
+        PDImageXObject imagen = PDImageXObject.createFromByteArray(doc, sello.imagen, "firma");
+
+        float anchoMax = 140f;
+        float altoMax = 60f;
+        float escala = Math.min(anchoMax / imagen.getWidth(), altoMax / imagen.getHeight());
+        float ancho = imagen.getWidth() * escala;
+        float alto = imagen.getHeight() * escala;
+        float margen = 24f;
+        float alturaTexto = 12f;
+
+        float x;
+        float y;
+        switch (sello.posicion) {
+            case SUPERIOR_IZQUIERDA -> {
+                x = margen;
+                y = box.getHeight() - margen - alto - alturaTexto;
+            }
+            case SUPERIOR_CENTRO -> {
+                x = (box.getWidth() - ancho) / 2;
+                y = box.getHeight() - margen - alto - alturaTexto;
+            }
+            case SUPERIOR_DERECHA -> {
+                x = box.getWidth() - margen - ancho;
+                y = box.getHeight() - margen - alto - alturaTexto;
+            }
+            case INFERIOR_IZQUIERDA -> {
+                x = margen;
+                y = margen + alturaTexto;
+            }
+            case INFERIOR_CENTRO -> {
+                x = (box.getWidth() - ancho) / 2;
+                y = margen + alturaTexto;
+            }
+            default -> {
+                x = box.getWidth() - margen - ancho;
+                y = margen + alturaTexto;
+            }
+        }
+
+        try (PDPageContentStream cs = new PDPageContentStream(
+                doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+            cs.drawImage(imagen, x, y + alturaTexto, ancho, alto);
+            if (sello.etiqueta != null && !sello.etiqueta.isBlank()) {
+                cs.beginText();
+                cs.setFont(PDType1Font.HELVETICA, 7);
+                cs.newLineAtOffset(x, y);
+                cs.showText(sello.etiqueta);
+                cs.endText();
+            }
         }
     }
 

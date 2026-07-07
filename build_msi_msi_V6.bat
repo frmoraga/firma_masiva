@@ -35,7 +35,7 @@ dir /b "%FXJMODS%\javafx*.jmod"
 
 "%JAVA_HOME%\bin\jlink.exe" --verbose ^
   --module-path "%JAVA_HOME%\jmods;%FXJMODS%" ^
-  --add-modules java.base,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,jdk.crypto.mscapi,jdk.crypto.cryptoki ^
+  --add-modules java.base,java.desktop,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,javafx.swing,jdk.crypto.mscapi,jdk.crypto.cryptoki ^
   --strip-debug --no-header-files --no-man-pages ^
   --output runtime
   

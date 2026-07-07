@@ -28,7 +28,7 @@ jpackage ^
   --icon assets\icon.ico ^
   --win-dir-chooser --win-menu --win-shortcut ^
   --module-path "%FX%" ^
-  --add-modules javafx.base,javafx.graphics,javafx.controls,javafx.fxml,jdk.crypto.mscapi ^
+  --add-modules java.desktop,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,javafx.swing,jdk.crypto.mscapi ^
   --java-options "--add-opens=java.base/sun.security.util=ALL-UNNAMED" ^
   --java-options "-Dsun.security.mscapi.keyStoreCompatibilityMode=true" ^
   --temp jpkg_tmp
