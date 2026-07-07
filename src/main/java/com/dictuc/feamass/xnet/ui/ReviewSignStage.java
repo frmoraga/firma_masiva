@@ -64,17 +64,23 @@ public final class ReviewSignStage extends Stage {
     private final ProgressIndicator spinner = new ProgressIndicator();
 
     private Task<?> currentTask;
+    private final java.util.function.Consumer<PdfSigner.PosicionSello> onPosicionCambiada;
 
     public ReviewSignStage(Stage appOwner, XnetSession session, InformeSummary informe,
-                            List<CertInfo> cachedCerts, byte[] firmaImagenPropia, Runnable onDone) {
+                            List<CertInfo> cachedCerts, byte[] firmaImagenPropia,
+                            PdfSigner.PosicionSello posicionInicial,
+                            java.util.function.Consumer<PdfSigner.PosicionSello> onPosicionCambiada,
+                            Runnable onDone) {
         this.appOwner = appOwner;
         this.session = session;
         this.informe = informe;
         this.firmaImagenPropia = firmaImagenPropia;
+        this.onPosicionCambiada = onPosicionCambiada;
         this.onDone = onDone;
 
         setTitle("XNET - Revisar y firmar informe #" + informe.id);
         initOwner(appOwner);
+        AppTheme.aplicarIcono(this);
 
         imageView.setPreserveRatio(true);
         imageView.setFitWidth(680);
@@ -127,8 +133,11 @@ public final class ReviewSignStage extends Stage {
         firmaRow.setAlignment(Pos.CENTER_LEFT);
 
         cboPosicionSello.setItems(FXCollections.observableArrayList(PdfSigner.PosicionSello.values()));
-        cboPosicionSello.getSelectionModel().select(PdfSigner.PosicionSello.INFERIOR_DERECHA);
+        cboPosicionSello.getSelectionModel().select(posicionInicial != null ? posicionInicial : PdfSigner.PosicionSello.INFERIOR_DERECHA);
         cboPosicionSello.setPrefWidth(160);
+        cboPosicionSello.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {
+            if (sel != null && onPosicionCambiada != null) onPosicionCambiada.accept(sel);
+        });
 
         HBox selloRow;
         if (firmaImagenPropia != null) {

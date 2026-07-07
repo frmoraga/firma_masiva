@@ -55,6 +55,9 @@ public final class PendingListStage extends Stage {
     private final Label lblPosicionBulk = AppTheme.etiqueta("Posicion:");
     private final Label lblSinImagenBulk = new Label("No tienes una imagen de firma configurada (panel Dictuc -> Mi cuenta).");
     private boolean ocupado = false;
+    // Compartida con ReviewSignStage: la posicion elegida en cualquiera de las dos ventanas
+    // (esta lista o "Revisar y firmar") queda como preferencia para la proxima vez.
+    private PdfSigner.PosicionSello posicionPreferida = PdfSigner.PosicionSello.INFERIOR_DERECHA;
 
     public PendingListStage(Stage appOwner, XnetSession session, List<CertInfo> cachedCerts) {
         this.appOwner = appOwner;
@@ -63,6 +66,7 @@ public final class PendingListStage extends Stage {
 
         setTitle("XNET - Informes pendientes de firma");
         initOwner(appOwner);
+        AppTheme.aplicarIcono(this);
 
         buildColumns();
         table.setPlaceholder(new Label("Sin informes pendientes."));
@@ -109,8 +113,11 @@ public final class PendingListStage extends Stage {
         rowBulk.setAlignment(Pos.CENTER_LEFT);
 
         cboPosicionBulk.setItems(FXCollections.observableArrayList(PdfSigner.PosicionSello.values()));
-        cboPosicionBulk.getSelectionModel().select(PdfSigner.PosicionSello.INFERIOR_DERECHA);
+        cboPosicionBulk.getSelectionModel().select(posicionPreferida);
         cboPosicionBulk.setPrefWidth(160);
+        cboPosicionBulk.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {
+            if (sel != null) posicionPreferida = sel;
+        });
         chkSelloBulk.setSelected(false);
         chkSelloBulk.setVisible(false);
         chkSelloBulk.setManaged(false);
@@ -179,6 +186,9 @@ public final class PendingListStage extends Stage {
     }
 
     private void buildColumns() {
+        TableColumn<InformeSummary, String> colId = new TableColumn<>("N°");
+        colId.setCellValueFactory(cd -> stringProp(String.valueOf(cd.getValue().id)));
+
         TableColumn<InformeSummary, String> colSolicitante = new TableColumn<>("RUT solicitante");
         colSolicitante.setCellValueFactory(cd -> stringProp(cd.getValue().rutSolicitante));
 
@@ -203,6 +213,7 @@ public final class PendingListStage extends Stage {
         // Reparte el ancho disponible entre las columnas en vez de dejarlas en su ancho
         // fijo por defecto (que trunca con "..." aunque sobre espacio a la derecha).
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
+        colId.setPrefWidth(60);
         colSolicitante.setPrefWidth(120);
         colFacturador.setPrefWidth(120);
         colUnidad.setPrefWidth(140);
@@ -210,7 +221,7 @@ public final class PendingListStage extends Stage {
         colCategoria.setPrefWidth(160);
         colEstado.setPrefWidth(140);
 
-        table.getColumns().setAll(List.of(colSolicitante, colFacturador, colUnidad, colFecha, colCategoria, colEstado));
+        table.getColumns().setAll(List.of(colId, colSolicitante, colFacturador, colUnidad, colFecha, colCategoria, colEstado));
     }
 
     private static SimpleStringProperty stringProp(String value) {
@@ -241,7 +252,8 @@ public final class PendingListStage extends Stage {
     private void abrirRevision() {
         InformeSummary sel = table.getSelectionModel().getSelectedItem();
         if (sel == null) return;
-        new ReviewSignStage(appOwner, session, sel, cachedCerts, firmaImagenPropia, this::cargarPendientes).show();
+        new ReviewSignStage(appOwner, session, sel, cachedCerts, firmaImagenPropia,
+                posicionPreferida, p -> posicionPreferida = p, this::cargarPendientes).show();
     }
 
     private void firmarSeleccionados() {

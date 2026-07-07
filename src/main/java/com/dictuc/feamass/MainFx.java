@@ -11,7 +11,6 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.image.Image;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
@@ -89,7 +88,7 @@ public class MainFx extends Application {
         AppTheme.apply(scene);
         stage.setScene(scene);
         stage.initStyle(StageStyle.DECORATED);
-        loadWindowIcons(stage);
+        AppTheme.aplicarIcono(stage);
         stage.show();
 
         // Tarea en segundo plano para no congelar la UI
@@ -453,14 +452,7 @@ public class MainFx extends Application {
 			alert.setTitle("Dictuc - Firma Masiva");
 			alert.setHeaderText(null); // sin cabecera, solo mensaje
 			AppTheme.apply(alert.getDialogPane().getScene());
-
-			// Agregar icono (igual que el de la app principal)
-			Stage alertStage = (Stage) alert.getDialogPane().getScene().getWindow();
-			var iconStream = getClass().getResourceAsStream("/icons/icon-64.png");
-			if (iconStream != null) {
-				alertStage.getIcons().add(new Image(iconStream));
-			}
-
+			AppTheme.aplicarIcono((Stage) alert.getDialogPane().getScene().getWindow());
 			alert.showAndWait();
 		});
 	}
@@ -476,25 +468,6 @@ public class MainFx extends Application {
         String ext = pdfMode ? ".pdf" : ".zip";
         String suggested = base + "_firmado" + ext;
         return new File(input.getParentFile(), suggested).getAbsolutePath();
-    }
-
-    /** Intenta cargar iconos del Stage desde /icons (PNG). */
-    private void loadWindowIcons(Stage stage) {
-        String[] names = {
-                "/icons/icon-16.png",
-                "/icons/icon-32.png",
-                "/icons/icon-64.png",
-                "/icons/icon-128.png"
-        };
-        for (String res : names) {
-            try {
-                var is = getClass().getResourceAsStream(res);
-                if (is != null) {
-                    stage.getIcons().add(new Image(is));
-                }
-            } catch (Exception ignored) {
-            }
-        }
     }
 
     private void showFatal(String msg) {

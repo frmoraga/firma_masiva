@@ -38,6 +38,7 @@ public final class LoginStage extends Stage {
 
         setTitle("XNET - Iniciar sesion");
         initOwner(appOwner);
+        AppTheme.aplicarIcono(this);
 
         txtEmail.setPromptText("Correo Dictuc");
         txtPassword.setPromptText("Contrasena");
