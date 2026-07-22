@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: mvn test
+        run: mvn -B test
+
+  package-smoke-test:
+    # Empaqueta con jpackage (mismo camino que build_msi_gui.bat) para detectar en cada push
+    # errores como modulos faltantes en --add-modules (ej. java.net.http), que solo aparecen
+    # al ejecutar la app ya empaquetada y no durante `mvn test`. No genera el MSI real (eso
+    # necesita WiX y admin); alcanza con --type app-image, que ya pasa por el mismo jlink.
+    needs: unit-tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Compilar jar (sin tests, ya corrieron en el job anterior)
+        run: mvn -B -DskipTests package
+
+      - name: Descargar JavaFX jmods
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://download2.gluonhq.com/openjfx/21.0.9/openjfx-21.0.9_windows-x64_bin-jmods.zip" -OutFile jmods.zip
+          Expand-Archive -Path jmods.zip -DestinationPath .
+
+      - name: jpackage (smoke test de empaquetado)
+        shell: pwsh
+        run: |
+          [xml]$pom = Get-Content pom.xml
+          $ver = $pom.project.version
+          Write-Host "Version: $ver"
+
+          & jpackage `
+            --type app-image `
+            --name "FEA Mass Signer" `
+            --app-version $ver `
+            --input target `
+            --main-jar "feamass-$ver-jar-with-dependencies.jar" `
+            --main-class com.dictuc.feamass.MainFx `
+            --icon assets\icon.ico `
+            --module-path "javafx-jmods-21.0.9" `
+            --add-modules java.desktop,java.net.http,javafx.base,javafx.graphics,javafx.controls,javafx.fxml,javafx.swing,jdk.crypto.mscapi `
+            --java-options "--add-opens=java.base/sun.security.util=ALL-UNNAMED" `
+            --java-options "-Dsun.security.mscapi.keyStoreCompatibilityMode=true" `
+            --dest dist_ci
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "jpackage fallo (exit $LASTEXITCODE)"
+            exit 1
+          }
+          if (-not (Test-Path "dist_ci\FEA Mass Signer\FEA Mass Signer.exe")) {
+            Write-Error "jpackage no genero el ejecutable esperado"
+            exit 1
+          }
+          Write-Host "OK: app-image generada correctamente."

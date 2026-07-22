@@ -3,3 +3,7 @@ programas/
 *.log
 .idea/
 *.iml
+*.msi
+jpkg_tmp/
+dist_ci*/
+run_log.txt
