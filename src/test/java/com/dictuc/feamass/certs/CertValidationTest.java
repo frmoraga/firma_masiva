@@ -3,6 +3,7 @@ package com.dictuc.feamass.certs;
 import org.bouncycastle.asn1.x509.KeyUsage;
 import org.junit.jupiter.api.Test;
 
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Date;
 
@@ -49,9 +50,17 @@ class CertValidationTest {
     void certificadoAutofirmadoSinCadenaDeConfianzaEsInvalido() throws Exception {
         // Regresion del hallazgo critico: antes de este fix, cualquier certificado autofirmado
         // (vigente, con el KeyUsage correcto) se aceptaba igual como valido para firmar.
+        // Se inyecta un almacen de confianza con una raiz de prueba no relacionada (en vez de
+        // usar el almacen "Windows-ROOT" real del sistema operativo, via la sobrecarga publica
+        // de 1 argumento): el tipo de almacen "Windows-ROOT" solo existe en Windows, asi que en
+        // un runner Linux (CI) ese camino ni siquiera llega a evaluar la cadena y termina en un
+        // mensaje distinto ("no esta disponible el almacen..."), rompiendo esta asercion sin
+        // que el fix este realmente mal. Con una raiz de prueba inyectada, CertPathValidator
+        // corre de verdad y el resultado es el mismo en cualquier sistema operativo.
+        TestCertFactory.TestCa raizNoRelacionada = TestCertFactory.raizDeConfianza();
         X509Certificate cert = TestCertFactory.vigenteConUso(KeyUsage.digitalSignature);
 
-        CertValidation.Result r = CertValidation.validar(cert);
+        CertValidation.Result r = CertValidation.validar(new Certificate[]{ cert }, raizNoRelacionada.trustStore());
 
         assertFalse(r.valido);
         assertTrue(r.motivo.contains("entidad certificadora de confianza"));
