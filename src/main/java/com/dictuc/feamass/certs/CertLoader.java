@@ -35,10 +35,10 @@ public final class CertLoader {
             String alias = e.nextElement();
             if (!ks.isKeyEntry(alias)) continue;
 
-            // Un solo certificado (no la cadena)
-            Certificate c = ks.getCertificate(alias);
-            if (c instanceof X509Certificate) {
-                list.add(new CertInfo(alias, (X509Certificate) c, ks));
+            // Cadena completa: hace falta para validar la confianza, no solo el certificado hoja.
+            Certificate[] chain = cadenaDe(ks, alias);
+            if (chain.length > 0 && chain[0] instanceof X509Certificate) {
+                list.add(new CertInfo(alias, chain, ks));
             }
         }
         return list;
@@ -70,10 +70,10 @@ public final class CertLoader {
             String alias = e.nextElement();
             if (!ks.isKeyEntry(alias)) continue;
 
-            // Un solo certificado (no la cadena)
-            Certificate c = ks.getCertificate(alias);
-            if (c instanceof X509Certificate) {
-                list.add(new CertInfo(alias, (X509Certificate) c, ks));
+            // Cadena completa: hace falta para validar la confianza, no solo el certificado hoja.
+            Certificate[] chain = cadenaDe(ks, alias);
+            if (chain.length > 0 && chain[0] instanceof X509Certificate) {
+                list.add(new CertInfo(alias, chain, ks));
             }
         }
         return list;
@@ -86,19 +86,31 @@ public final class CertLoader {
             throw new IllegalStateException("No se pudo obtener privateKey para alias: " + ci.alias);
         }
 
-        Certificate[] chain = ci.ks.getCertificateChain(ci.alias);
-        if (chain == null || chain.length == 0) {
-            Certificate single = ci.ks.getCertificate(ci.alias);
-            chain = (single == null) ? new Certificate[0] : new Certificate[]{ single };
-        }
+        Certificate[] chain = cadenaDe(ci.ks, ci.alias);
         if (chain.length == 0 || !(chain[0] instanceof X509Certificate)) {
             throw new IllegalStateException("Cadena de certificados vacía o inválida para alias: " + ci.alias);
+        }
+
+        // Última barrera antes de firmar: aunque la UI ya bloquea los certificados no utilizables,
+        // aquí se revalida (vigencia, uso de clave y cadena de confianza) porque este es el único
+        // punto por el que pasan todos los flujos de firma.
+        CertValidation.Result v = CertValidation.validar(chain);
+        if (!v.valido) {
+            throw new IllegalStateException("Certificado no utilizable para firmar: " + v.motivo);
         }
 
         // Firmante = primer elemento de la cadena
         X509Certificate signer = (X509Certificate) chain[0];
 
         return new com.dictuc.feamass.KeyAndCert((PrivateKey) key, chain, signer);
+    }
+
+    /** Cadena del alias; si el almacén no la entrega, se usa el certificado suelto. */
+    private static Certificate[] cadenaDe(KeyStore ks, String alias) throws KeyStoreException {
+        Certificate[] chain = ks.getCertificateChain(alias);
+        if (chain != null && chain.length > 0) return chain;
+        Certificate single = ks.getCertificate(alias);
+        return (single == null) ? new Certificate[0] : new Certificate[]{ single };
     }
 
     private static String readUtf8(Path p) throws IOException {

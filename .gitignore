@@ -7,3 +7,4 @@ programas/
 jpkg_tmp/
 dist_ci*/
 run_log.txt
+config.properties

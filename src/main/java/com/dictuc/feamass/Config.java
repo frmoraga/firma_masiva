@@ -8,20 +8,25 @@ import java.nio.file.Paths;
 import java.util.Properties;
 
 public final class Config {
-    private static final Properties P = new Properties();
+    private static final Properties P = build();
 
-    // Carga config.properties desde:
-    // 1) la carpeta del JAR (si aplica)
-    // 2) el directorio de trabajo actual
-    // 3) el classpath (resources)
-    static {
-        Path jarDir = getJarDir();
-        if (jarDir != null) loadIfExists(jarDir.resolve("config.properties"));
-        loadIfExists(Paths.get("config.properties"));
-        // desde resources en el classpath
+    // Precedencia real (el directorio de trabajo actual gana, despues la carpeta del JAR,
+    // despues los defaults empaquetados en el classpath): se arma con Properties encadenadas
+    // via el constructor Properties(defaults), en vez de P.load() repetido sobre el mismo
+    // objeto -- P.load() SOBRESCRIBE claves ya cargadas, asi que la ULTIMA llamada gana sin
+    // importar el orden pensado; con el classpath cargando al final, terminaba siempre
+    // ganando el sobre cualquier config externa real.
+    private static Properties build() {
+        Properties defaults = new Properties();
         try (InputStream in = Config.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (in != null) P.load(in);
+            if (in != null) defaults.load(in);
         } catch (IOException ignore) {}
+
+        Properties external = new Properties(defaults);
+        Path jarDir = getJarDir();
+        if (jarDir != null) loadIfExists(external, jarDir.resolve("config.properties"));
+        loadIfExists(external, Paths.get("config.properties"));
+        return external;
     }
 
     private static Path getJarDir() {
@@ -34,10 +39,10 @@ public final class Config {
         }
     }
 
-    private static void loadIfExists(Path p) {
+    private static void loadIfExists(Properties target, Path p) {
         if (p == null || !Files.exists(p)) return;
         try (InputStream in = Files.newInputStream(p)) {
-            P.load(in);
+            target.load(in);
         } catch (IOException ignore) {}
     }
 

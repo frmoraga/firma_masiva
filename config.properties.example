@@ -1,0 +1,15 @@
+# Copia este archivo a "config.properties" (mismo directorio, o junto al .exe/.jar instalado)
+# para desarrollo/pruebas locales. NO se versiona (ver .gitignore) porque va a contener datos
+# de tu entorno real (URL del backend, ruta del driver PKCS#11 si usas token).
+#
+# Usar 127.0.0.1 (no "localhost"): con "php -S localhost:8899" el servidor puede quedar
+# escuchando solo en IPv6 (::1) y el HttpClient de Java falla al conectar por IPv4.
+# Levantar el server con: php -S 127.0.0.1:8899 -t public
+xnet.base.url=http://127.0.0.1:8899
+xnet.connect.timeout.ms=8000
+xnet.read.timeout.ms=30000
+xnet.preview.dpi=110
+
+# Solo si vas a firmar con un token PKCS#11 en vez del almacen Windows-MY:
+#pkcs11.lib=C:\\Windows\\System32\\eTPKCS11.dll
+#pkcs11.slot=0

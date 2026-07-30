@@ -1,19 +1,22 @@
 package com.dictuc.feamass.certs;
 
 import java.security.KeyStore;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 
 public final class CertInfo {
     public final String alias;
-    public final X509Certificate cert; // un solo certificado
+    public final X509Certificate cert;   // certificado del firmante (primero de la cadena)
+    public final Certificate[] chain;    // cadena completa tal como la entrega el almacén
     public final KeyStore ks;
     public final CertValidation.Result validacion;
 
-    public CertInfo(String alias, X509Certificate cert, KeyStore ks) {
+    public CertInfo(String alias, Certificate[] chain, KeyStore ks) {
         this.alias = alias;
-        this.cert = cert;
+        this.chain = (chain == null) ? new Certificate[0] : chain;
+        this.cert = CertValidation.firmante(this.chain);
         this.ks = ks;
-        this.validacion = CertValidation.validar(cert);
+        this.validacion = CertValidation.validar(this.chain);
     }
 
     public boolean esValido() {

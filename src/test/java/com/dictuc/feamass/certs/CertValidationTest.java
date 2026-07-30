@@ -13,38 +13,55 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CertValidationTest {
 
     @Test
-    void certificadoVigenteConDigitalSignatureEsValido() throws Exception {
-        X509Certificate cert = TestCertFactory.vigenteConUso(KeyUsage.digitalSignature);
+    void certificadoVigenteConDigitalSignatureYCadenaDeConfianzaEsValido() throws Exception {
+        TestCertFactory.TestCa ca = TestCertFactory.raizDeConfianza();
+        var kc = ca.emitirVigente(KeyUsage.digitalSignature);
 
-        CertValidation.Result r = CertValidation.validar(cert);
+        CertValidation.Result r = CertValidation.validar(kc.chain(), ca.trustStore());
 
         assertTrue(r.valido);
         assertNull(r.motivo);
     }
 
     @Test
-    void certificadoVigenteConNonRepudiationEsValido() throws Exception {
-        X509Certificate cert = TestCertFactory.vigenteConUso(KeyUsage.nonRepudiation);
+    void certificadoVigenteConNonRepudiationYCadenaDeConfianzaEsValido() throws Exception {
+        TestCertFactory.TestCa ca = TestCertFactory.raizDeConfianza();
+        var kc = ca.emitirVigente(KeyUsage.nonRepudiation);
 
-        CertValidation.Result r = CertValidation.validar(cert);
+        CertValidation.Result r = CertValidation.validar(kc.chain(), ca.trustStore());
 
         assertTrue(r.valido);
     }
 
     @Test
-    void certificadoSinExtensionKeyUsageEsValido() throws Exception {
+    void certificadoSinExtensionKeyUsageConCadenaDeConfianzaEsValido() throws Exception {
+        TestCertFactory.TestCa ca = TestCertFactory.raizDeConfianza();
         Date ahora = new Date();
         Date en1Anio = new Date(ahora.getTime() + 365L * 24 * 3600 * 1000);
-        X509Certificate cert = TestCertFactory.firmante(ahora, en1Anio, null).cert();
+        var kc = ca.emitir(ahora, en1Anio, null);
+
+        CertValidation.Result r = CertValidation.validar(kc.chain(), ca.trustStore());
+
+        assertTrue(r.valido);
+    }
+
+    @Test
+    void certificadoAutofirmadoSinCadenaDeConfianzaEsInvalido() throws Exception {
+        // Regresion del hallazgo critico: antes de este fix, cualquier certificado autofirmado
+        // (vigente, con el KeyUsage correcto) se aceptaba igual como valido para firmar.
+        X509Certificate cert = TestCertFactory.vigenteConUso(KeyUsage.digitalSignature);
 
         CertValidation.Result r = CertValidation.validar(cert);
 
-        assertTrue(r.valido);
+        assertFalse(r.valido);
+        assertTrue(r.motivo.contains("entidad certificadora de confianza"));
     }
 
     @Test
     void certificadoConKeyUsageSinFirmaEsInvalido() throws Exception {
-        // keyEncipherment (bit 2) sin digitalSignature (bit 0) ni nonRepudiation (bit 1)
+        // keyEncipherment (bit 2) sin digitalSignature (bit 0) ni nonRepudiation (bit 1).
+        // Se rechaza por KeyUsage antes de llegar a validar la cadena, asi que no hace
+        // falta una cadena de confianza real para este caso.
         X509Certificate cert = TestCertFactory.vigenteConUso(KeyUsage.keyEncipherment);
 
         CertValidation.Result r = CertValidation.validar(cert);
@@ -79,7 +96,7 @@ class CertValidationTest {
 
     @Test
     void certificadoNuloEsInvalido() {
-        CertValidation.Result r = CertValidation.validar(null);
+        CertValidation.Result r = CertValidation.validar((X509Certificate) null);
 
         assertFalse(r.valido);
     }
