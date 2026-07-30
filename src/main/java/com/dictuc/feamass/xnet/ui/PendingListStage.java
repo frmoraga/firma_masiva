@@ -261,11 +261,9 @@ public final class PendingListStage extends Stage {
         CertInfo cert = cboCertBulk.getSelectionModel().getSelectedItem();
         if (seleccion.isEmpty() || cert == null || !cert.esValido()) return;
 
-        boolean confirmado = AppTheme.confirmar(
-                "Vas a firmar " + seleccion.size() + " informe(s) con el certificado:\n" + cert
-                        + "\n\nCada informe se firma y sube a XNET sin vista previa individual "
-                        + "(revisalos antes con \"Revisar y firmar\" si necesitas verlos uno por uno).\n\n"
-                        + "¿Confirmas la firma masiva?");
+        // Confirmacion con contenido a la vista: que informes son y que dice cada uno. Antes era
+        // solo un dialogo con la cantidad, o sea que se firmaban N documentos sin verlos nunca.
+        boolean confirmado = BulkReviewStage.confirmar(this, session, seleccion, cert);
         if (!confirmado) return;
 
         PdfSigner.SelloVisual selloBase = null;

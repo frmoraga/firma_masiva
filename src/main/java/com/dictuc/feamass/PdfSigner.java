@@ -18,11 +18,23 @@ import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 
+import com.dictuc.feamass.tsa.HttpTsaClient;
+import com.dictuc.feamass.tsa.TsaClient;
+import com.dictuc.feamass.tsa.TsaConfig;
+
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.CMSSignedData;
 import org.bouncycastle.cms.CMSSignedDataGenerator;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSTypedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
@@ -82,11 +94,36 @@ public final class PdfSigner {
         }
     }
 
+    /**
+     * Espacio reservado para el PKCS#7 dentro del PDF (PDFBox rellena con ceros y despues escribe
+     * la firma real ahi). El default de PDFBox son 9472 bytes, que alcanzaban para un CMS "pelado",
+     * pero se quedan cortos al sumar el token del sello de tiempo (el token trae la cadena del TSA,
+     * ~4-6 KB). Si no alcanzara, PDFBox aborta con "Can't write signature, not enough space", asi
+     * que se reserva con holgura: cuesta ~64 KB por PDF firmado (el hueco va en hexadecimal, 2
+     * caracteres por byte) y evita que la firma falle por una cadena de certificados larga.
+     */
+    private static final int TAMANO_FIRMA_RESERVADO = 32_768;
+
     /** Firma un PDF de forma incremental y genera PKCS#7 detached, desde archivo a archivo. */
     public static void signSingle(File inputPdf, File outputPdf, KeyAndCert kc) throws Exception {
         try (PDDocument doc = PDDocument.load(inputPdf);
              OutputStream os = new BufferedOutputStream(new FileOutputStream(outputPdf))) {
-            signIntoStream(doc, os, kc, null);
+            signIntoStream(doc, os, kc, null, tsaPorDefecto());
+        }
+    }
+
+    /**
+     * Cliente de sellado de tiempo configurado, o null si esta deshabilitado / sin URL. Es
+     * "mejor esfuerzo": si el TSA no responde se firma igual, sin sello (ver conSelloDeTiempo).
+     */
+    private static TsaClient tsaPorDefecto() {
+        if (!TsaConfig.habilitado() || TsaConfig.url().isBlank()) return null;
+        try {
+            return HttpTsaClient.desdeConfig();
+        } catch (RuntimeException e) {
+            // URL mal escrita en config.properties: no es motivo para impedir firmar.
+            ActivityLog.registrar("Sello de tiempo desactivado: tsa.url invalida (" + resumenDeError(e) + ")");
+            return null;
         }
     }
 
@@ -186,9 +223,17 @@ public final class PdfSigner {
 
     /** Igual que signToBytes(byte[], KeyAndCert), pero estampando antes un sello visual (opcional). */
     public static byte[] signToBytes(byte[] inputPdf, KeyAndCert kc, SelloVisual sello) throws Exception {
+        return signToBytes(inputPdf, kc, sello, tsaPorDefecto());
+    }
+
+    /**
+     * Variante con el cliente de sellado de tiempo explicito. Existe para los tests (permite
+     * apuntar a un TSA de prueba o a uno inalcanzable); la app usa siempre el de configuracion.
+     */
+    public static byte[] signToBytes(byte[] inputPdf, KeyAndCert kc, SelloVisual sello, TsaClient tsa) throws Exception {
         try (PDDocument doc = PDDocument.load(new ByteArrayInputStream(inputPdf));
              ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64_000, inputPdf.length + 8_000))) {
-            signIntoStream(doc, out, kc, sello);
+            signIntoStream(doc, out, kc, sello, tsa);
             return out.toByteArray();
         }
     }
@@ -203,41 +248,41 @@ public final class PdfSigner {
      * (CreateVisibleSignature2): la imagen se asocia como apariencia visible (/AP /N) del campo
      * de firma en si, via SignatureOptions.setVisualSignature(...).
      */
-    private static void signIntoStream(PDDocument doc, OutputStream os, KeyAndCert kc, SelloVisual sello) throws Exception {
+    private static void signIntoStream(PDDocument doc, OutputStream os, KeyAndCert kc, SelloVisual sello,
+                                       TsaClient tsa) throws Exception {
         PDSignature sig = new PDSignature();
         sig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
         sig.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
         sig.setName(kc.cert().getSubjectX500Principal().getName());
+        // Fecha declarada por el equipo que firma: es solo informativa y falsificable cambiando
+        // el reloj local. La hora que vale para probar CUANDO se firmo es la del sello RFC 3161
+        // que se adjunta mas abajo (cmsSign -> conSelloDeTiempo).
         sig.setSignDate(Calendar.getInstance());
 
-        SignatureOptions signatureOptions = null;
+        SignatureOptions signatureOptions = new SignatureOptions();
         try {
+            signatureOptions.setPreferredSignatureSize(TAMANO_FIRMA_RESERVADO);
             if (sello != null && doc.getNumberOfPages() > 0) {
-                signatureOptions = new SignatureOptions();
                 int pagina = sello.pagina < 0
                         ? doc.getNumberOfPages() - 1
                         : Math.min(sello.pagina, doc.getNumberOfPages() - 1);
                 PDRectangle rect = calcularRectanguloSello(doc.getPage(pagina), sello);
                 signatureOptions.setVisualSignature(crearPlantillaVisual(doc, pagina, rect, sello));
                 signatureOptions.setPage(pagina);
-                doc.addSignature(sig, signatureOptions);
-            } else {
-                doc.addSignature(sig);
             }
+            doc.addSignature(sig, signatureOptions);
 
             ExternalSigningSupport ext = doc.saveIncrementalForExternalSigning(os);
             byte[] toBeSigned = readAll(ext.getContent());
-            byte[] cms = cmsSign(toBeSigned, kc.privateKey(), kc.chain());
+            byte[] cms = cmsSign(toBeSigned, kc.privateKey(), kc.chain(), tsa);
             ext.setSignature(cms);
         } finally {
             // No cerrar signatureOptions antes de terminar de guardar: algunos COSStream que
             // contiene quedan referenciados por el documento ya firmado (ver comentario del
             // ejemplo oficial de PDFBox, PDFBOX-3743).
-            if (signatureOptions != null) {
-                try {
-                    signatureOptions.close();
-                } catch (IOException ignore) {
-                }
+            try {
+                signatureOptions.close();
+            } catch (IOException ignore) {
             }
         }
     }
@@ -389,7 +434,8 @@ public final class PdfSigner {
 
     private static byte[] cmsSign(byte[] toBeSigned,
                                   PrivateKey privateKey,
-                                  java.security.cert.Certificate[] chain) throws Exception {
+                                  java.security.cert.Certificate[] chain,
+                                  TsaClient tsa) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
         for (java.security.cert.Certificate c : chain) certs.add((X509Certificate) c);
         X509Certificate signerCert = certs.get(0);
@@ -406,6 +452,51 @@ public final class PdfSigner {
 
         CMSTypedData content = new CMSProcessableByteArray(toBeSigned);
         CMSSignedData signed = gen.generate(content, false); // detached
-        return signed.getEncoded();
+        return conSelloDeTiempo(signed, tsa).getEncoded();
+    }
+
+    /**
+     * Adjunta al SignerInfo un sello de tiempo RFC 3161 (atributo NO firmado
+     * id-aa-signatureTimeStampToken, OID 1.2.840.113549.1.9.16.2.14) emitido por un TSA externo
+     * sobre el valor de la firma. Es lo que permite demostrar, cuando el certificado ya expiro o
+     * fue revocado, que la firma es anterior a ese momento: la fecha del diccionario /M del PDF
+     * la pone el propio equipo que firma y no prueba nada.
+     *
+     * Nunca lanza: si el TSA no responde (sin red, timeout, respuesta invalida) se deja la firma
+     * TAL COMO ERA ANTES de este cambio -valida, solo sin sello- y se anota en la bitacora. Un
+     * sello de tiempo es una mejora deseable, no un requisito: bloquear la firma masiva completa
+     * porque un servicio externo esta caido seria un problema mayor que no tener el sello.
+     */
+    private static CMSSignedData conSelloDeTiempo(CMSSignedData signed, TsaClient tsa) {
+        if (tsa == null) return signed;
+        try {
+            SignerInformation firmante = signed.getSignerInfos().getSigners().iterator().next();
+
+            // Se sella el valor de firma (encryptedDigest), que es lo que exige RFC 3161 para
+            // este atributo. Al TSA solo viaja su hash SHA-256, nunca el contenido del PDF.
+            byte[] token = tsa.obtenerToken(firmante.getSignature());
+
+            AttributeTable noFirmados = firmante.getUnsignedAttributes();
+            ASN1EncodableVector atributos = noFirmados == null
+                    ? new ASN1EncodableVector()
+                    : noFirmados.toASN1EncodableVector();
+            atributos.add(new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                    new DERSet(ASN1Primitive.fromByteArray(token))));
+
+            SignerInformation conSello = SignerInformation.replaceUnsignedAttributes(
+                    firmante, new AttributeTable(atributos));
+            return CMSSignedData.replaceSigners(signed, new SignerInformationStore(conSello));
+        } catch (Exception e) {
+            ActivityLog.registrar("Firma sin sello de tiempo: el TSA no respondio ("
+                    + resumenDeError(e) + "). La firma es valida igual.");
+            return signed;
+        }
+    }
+
+    /** Resumen del error para la bitacora: tipo + mensaje, nunca contenido del documento. */
+    private static String resumenDeError(Exception e) {
+        String msg = e.getMessage();
+        return e.getClass().getSimpleName() + (msg == null || msg.isBlank() ? "" : ": " + msg);
     }
 }

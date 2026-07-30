@@ -18,9 +18,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -47,13 +44,9 @@ public final class ReviewSignStage extends Stage {
     private final Runnable onDone;
 
     private byte[] originalPdfBytes;
-    private List<Image> pages;
-    private int pageIndex = 0;
 
-    private final ImageView imageView = new ImageView();
-    private final Label lblPage = new Label();
-    private final Button btnPrev = new Button("< Anterior");
-    private final Button btnNext = new Button("Siguiente >");
+    /** Visor compartido con la confirmacion de firma masiva (ver PdfPreviewPane). */
+    private final PdfPreviewPane visor = new PdfPreviewPane(680, 480);
     private final ComboBox<CertInfo> cboCerts = new ComboBox<>();
     private final CheckBox chkSello = new CheckBox("Incluir imagen de mi firma en el PDF");
     private final ComboBox<PdfSigner.PosicionSello> cboPosicionSello = new ComboBox<>();
@@ -81,26 +74,6 @@ public final class ReviewSignStage extends Stage {
         setTitle("XNET - Revisar y firmar informe #" + informe.id);
         initOwner(appOwner);
         AppTheme.aplicarIcono(this);
-
-        imageView.setPreserveRatio(true);
-        imageView.setFitWidth(680);
-        // Defensa en profundidad: no permitir arrastrar la imagen ni abrir menu contextual.
-        imageView.setOnDragDetected(javafx.event.Event::consume);
-        imageView.setOnContextMenuRequested(javafx.event.Event::consume);
-
-        ScrollPane scroll = new ScrollPane(imageView);
-        scroll.setFitToWidth(true);
-        scroll.setPrefViewportHeight(480);
-        scroll.getStyleClass().add("visor-preview");
-        VBox.setVgrow(scroll, Priority.ALWAYS);
-
-        btnPrev.getStyleClass().add("button-secundario");
-        btnNext.getStyleClass().add("button-secundario");
-        btnPrev.setOnAction(e -> showPage(pageIndex - 1));
-        btnNext.setOnAction(e -> showPage(pageIndex + 1));
-        lblPage.getStyleClass().add("subtitulo");
-        HBox nav = new HBox(10, btnPrev, lblPage, btnNext);
-        nav.setAlignment(Pos.CENTER);
 
         cboCerts.setPromptText("Selecciona un certificado…");
         cboCerts.setPrefWidth(380);
@@ -150,9 +123,10 @@ public final class ReviewSignStage extends Stage {
         }
         selloRow.setAlignment(Pos.CENTER_LEFT);
 
-        VBox previewCard = new VBox(10, nav, scroll);
+        VBox previewCard = new VBox(10, visor);
         previewCard.getStyleClass().add("card");
         VBox.setVgrow(previewCard, Priority.ALWAYS);
+        VBox.setVgrow(visor, Priority.ALWAYS);
 
         VBox bottom = new VBox(12, selloRow, firmaRow, lblCertWarning, lblStatus);
         bottom.setPadding(new Insets(4, 0, 0, 0));
@@ -173,21 +147,14 @@ public final class ReviewSignStage extends Stage {
 
         Scene scene = new Scene(root, 780, 720);
         // Defensa en profundidad: bloquear atajos de guardar/imprimir/copiar sobre la vista previa.
-        scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, ev -> {
-            if (KeyCombination.keyCombination("Shortcut+S").match(ev)
-                    || KeyCombination.keyCombination("Shortcut+P").match(ev)
-                    || KeyCombination.keyCombination("Shortcut+C").match(ev)
-                    || ev.getCode() == KeyCode.PRINTSCREEN) {
-                ev.consume();
-            }
-        });
+        PdfPreviewPane.protegerAtajos(scene);
         AppTheme.apply(scene);
         setScene(scene);
 
         setOnCloseRequest(ev -> {
             if (currentTask != null) currentTask.cancel();
             originalPdfBytes = null;
-            pages = null;
+            visor.limpiar();
         });
 
         cargarYRenderizar();
@@ -205,12 +172,11 @@ public final class ReviewSignStage extends Stage {
         };
         currentTask = task;
         task.setOnSucceeded(ev -> {
-            pages = task.getValue();
+            visor.mostrar(task.getValue());
             setBusy(false, "");
-            if (pages.isEmpty()) {
+            if (!visor.tienePaginas()) {
                 lblStatus.setText("El informe no tiene paginas para mostrar.");
             } else {
-                showPage(0);
                 actualizarBotonFirmar();
             }
         });
@@ -219,15 +185,6 @@ public final class ReviewSignStage extends Stage {
             handleError(task.getException(), false);
         });
         new Thread(task, "xnet-preview").start();
-    }
-
-    private void showPage(int idx) {
-        if (pages == null || pages.isEmpty()) return;
-        pageIndex = Math.max(0, Math.min(idx, pages.size() - 1));
-        imageView.setImage(pages.get(pageIndex));
-        lblPage.setText("Pagina " + (pageIndex + 1) + " / " + pages.size());
-        btnPrev.setDisable(pageIndex == 0);
-        btnNext.setDisable(pageIndex == pages.size() - 1);
     }
 
     private void firmarYSubir() {
@@ -274,7 +231,7 @@ public final class ReviewSignStage extends Stage {
         task.setOnSucceeded(ev -> {
             setBusy(false, "");
             originalPdfBytes = null;
-            pages = null;
+            visor.limpiar();
             ActivityLog.registrar("Firma XNET OK informe #" + informe.id + " cert=" + sel.alias);
             AppTheme.alert(Alert.AlertType.INFORMATION,
                     "Informe #" + informe.id + " firmado y enviado a XNET.");
@@ -306,7 +263,7 @@ public final class ReviewSignStage extends Stage {
         lblCertWarning.setText(mostrarAviso ? "Este certificado no se puede usar para firmar: " + sel.validacion.motivo : "");
         lblCertWarning.setVisible(mostrarAviso);
         lblCertWarning.setManaged(mostrarAviso);
-        btnFirmar.setDisable(spinner.isVisible() || pages == null || pages.isEmpty() || !certOk);
+        btnFirmar.setDisable(spinner.isVisible() || !visor.tienePaginas() || !certOk);
     }
 
     private void handleError(Throwable ex, boolean duringSign) {

@@ -44,6 +44,27 @@ jobs:
           Invoke-WebRequest -Uri "https://download2.gluonhq.com/openjfx/21.0.9/openjfx-21.0.9_windows-x64_bin-jmods.zip" -OutFile jmods.zip
           Expand-Archive -Path jmods.zip -DestinationPath .
 
+      # jpackage mete TODO lo que encuentre en --input dentro de la app. Con --input target se
+      # empaquetaban tambien target\classes, maven-status, generated-sources, archive-tmp y una
+      # copia extra del jar sin dependencias. Se arma una carpeta con solo el fat jar (limpiandola
+      # antes, para que un runner reutilizado no arrastre un jar de una version anterior).
+      - name: Preparar carpeta de entrada limpia para jpackage
+        shell: pwsh
+        run: |
+          [xml]$pom = Get-Content pom.xml
+          $ver = $pom.project.version
+          $stage = "target\jpackage-input"
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target\feamass-$ver-jar-with-dependencies.jar" -Destination $stage
+          Get-ChildItem $stage | ForEach-Object { Write-Host "staged: $($_.Name)" }
+
+      # OJO --add-opens=java.base/sun.security.util: no hay codigo que use ese paquete interno
+      # (CertLoader usa solo la API publica: Security.getProvider("SunMSCAPI") + KeyStore
+      # "Windows-MY"), asi que se ve eliminable, pero no se quita a ciegas: si algo de la cadena
+      # SunMSCAPI lo necesitara en runtime, la app empaquetada fallaria al listar certificados y
+      # ningun test lo detectaria (no tocan Windows-MY ni hardware). Verificar con un MSI real y
+      # un certificado/token de verdad antes de sacarlo, aqui y en build_msi_gui.bat.
       - name: jpackage (smoke test de empaquetado)
         shell: pwsh
         run: |
@@ -55,7 +76,7 @@ jobs:
             --type app-image `
             --name "FEA Mass Signer" `
             --app-version $ver `
-            --input target `
+            --input "target\jpackage-input" `
             --main-jar "feamass-$ver-jar-with-dependencies.jar" `
             --main-class com.dictuc.feamass.MainFx `
             --icon assets\icon.ico `
