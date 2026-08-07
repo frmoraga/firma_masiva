@@ -27,13 +27,17 @@ import javafx.stage.Stage;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
- * Revision (vista previa en memoria, sin guardar/imprimir/copiar) y firma de un informe
- * descargado desde XNET. El PDF original y el firmado solo existen como bytes en memoria:
- * nunca se escriben a disco ni quedan accesibles al usuario.
+ * Revision (vista previa en memoria, sin guardar/imprimir/copiar), firma y rechazo de un
+ * informe descargado desde XNET. El PDF original y el firmado solo existen como bytes en
+ * memoria: nunca se escriben a disco ni quedan accesibles al usuario.
  */
 public final class ReviewSignStage extends Stage {
+
+    /** Que decidio el usuario sobre este informe -- solo se reporta si realmente hubo decision. */
+    public enum Resultado { FIRMADO, RECHAZADO }
 
     private static final DateTimeFormatter ETIQUETA_FMT = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
 
@@ -41,7 +45,7 @@ public final class ReviewSignStage extends Stage {
     private final XnetSession session;
     private final InformeSummary informe;
     private final byte[] firmaImagenPropia;
-    private final Runnable onDone;
+    private final Consumer<Resultado> onDone;
 
     private byte[] originalPdfBytes;
 
@@ -51,6 +55,7 @@ public final class ReviewSignStage extends Stage {
     private final CheckBox chkSello = new CheckBox("Incluir imagen de mi firma en el PDF");
     private final ComboBox<PdfSigner.PosicionSello> cboPosicionSello = new ComboBox<>();
     private final Button btnFirmar = new Button("Firmar y enviar");
+    private final Button btnRechazar = new Button("Rechazar…");
     private final Button btnCancelar = new Button("Cancelar");
     private final Label lblStatus = new Label();
     private final Label lblCertWarning = new Label();
@@ -63,7 +68,7 @@ public final class ReviewSignStage extends Stage {
                             List<CertInfo> cachedCerts, byte[] firmaImagenPropia,
                             PdfSigner.PosicionSello posicionInicial,
                             java.util.function.Consumer<PdfSigner.PosicionSello> onPosicionCambiada,
-                            Runnable onDone) {
+                            Consumer<Resultado> onDone) {
         this.appOwner = appOwner;
         this.session = session;
         this.informe = informe;
@@ -82,7 +87,7 @@ public final class ReviewSignStage extends Stage {
             cboCerts.setItems(FXCollections.observableArrayList(cachedCerts));
             if (!cachedCerts.isEmpty()) cboCerts.getSelectionModel().select(0);
         }
-        cboCerts.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> actualizarBotonFirmar());
+        cboCerts.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> actualizarBotones());
 
         lblCertWarning.getStyleClass().add("texto-error");
         lblCertWarning.setWrapText(true);
@@ -94,6 +99,10 @@ public final class ReviewSignStage extends Stage {
         btnFirmar.setDisable(true);
         btnFirmar.setOnAction(e -> firmarYSubir());
 
+        btnRechazar.getStyleClass().add("button-peligro");
+        btnRechazar.setDisable(true);
+        btnRechazar.setOnAction(e -> rechazarInforme());
+
         btnCancelar.getStyleClass().add("button-fantasma");
         btnCancelar.setOnAction(e -> close());
 
@@ -102,7 +111,7 @@ public final class ReviewSignStage extends Stage {
         lblStatus.setWrapText(true);
         lblStatus.getStyleClass().add("texto-error");
 
-        HBox firmaRow = new HBox(10, AppTheme.etiqueta("Certificado:"), cboCerts, btnFirmar, btnCancelar, spinner);
+        HBox firmaRow = new HBox(10, AppTheme.etiqueta("Certificado:"), cboCerts, btnFirmar, btnRechazar, btnCancelar, spinner);
         firmaRow.setAlignment(Pos.CENTER_LEFT);
 
         cboPosicionSello.setItems(FXCollections.observableArrayList(PdfSigner.PosicionSello.values()));
@@ -177,7 +186,7 @@ public final class ReviewSignStage extends Stage {
             if (!visor.tienePaginas()) {
                 lblStatus.setText("El informe no tiene paginas para mostrar.");
             } else {
-                actualizarBotonFirmar();
+                actualizarBotones();
             }
         });
         task.setOnFailed(ev -> {
@@ -233,9 +242,7 @@ public final class ReviewSignStage extends Stage {
             originalPdfBytes = null;
             visor.limpiar();
             ActivityLog.registrar("Firma XNET OK informe #" + informe.id + " cert=" + sel.alias);
-            AppTheme.alert(Alert.AlertType.INFORMATION,
-                    "Informe #" + informe.id + " firmado y enviado a XNET.");
-            onDone.run();
+            onDone.accept(Resultado.FIRMADO);
             close();
         });
         task.setOnFailed(ev -> {
@@ -248,35 +255,78 @@ public final class ReviewSignStage extends Stage {
         new Thread(task, "xnet-firmar").start();
     }
 
+    private void rechazarInforme() {
+        if (originalPdfBytes == null) {
+            lblStatus.setText("El informe aun no ha terminado de cargarse.");
+            return;
+        }
+
+        var justificacion = AppTheme.pedirTexto(
+                "Rechazar informe #" + informe.id,
+                "Explica el motivo del rechazo (por ejemplo, un error encontrado en el PDF):");
+        if (justificacion.isEmpty()) {
+            return;
+        }
+        String motivo = justificacion.get();
+
+        setBusy(true, "Rechazando y notificando a XNET…");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                session.client().rechazar(informe.id, session.csrfToken(), motivo);
+                return null;
+            }
+        };
+        currentTask = task;
+        task.setOnSucceeded(ev -> {
+            setBusy(false, "");
+            originalPdfBytes = null;
+            visor.limpiar();
+            ActivityLog.registrar("Rechazo XNET OK informe #" + informe.id);
+            onDone.accept(Resultado.RECHAZADO);
+            close();
+        });
+        task.setOnFailed(ev -> {
+            setBusy(false, "");
+            Throwable ex = task.getException();
+            ActivityLog.registrar("Rechazo XNET ERROR informe #" + informe.id
+                    + " " + (ex != null ? ex.getMessage() : ""));
+            handleError(ex, true);
+        });
+        new Thread(task, "xnet-rechazar").start();
+    }
+
     private void setBusy(boolean busy, String status) {
         spinner.setVisible(busy);
-        actualizarBotonFirmar();
+        actualizarBotones();
         btnCancelar.setDisable(busy);
         lblStatus.getStyleClass().setAll(busy ? "subtitulo" : "texto-error");
         lblStatus.setText(status);
     }
 
-    private void actualizarBotonFirmar() {
+    private void actualizarBotones() {
         CertInfo sel = cboCerts.getSelectionModel().getSelectedItem();
         boolean certOk = sel != null && sel.esValido();
         boolean mostrarAviso = sel != null && !certOk;
         lblCertWarning.setText(mostrarAviso ? "Este certificado no se puede usar para firmar: " + sel.validacion.motivo : "");
         lblCertWarning.setVisible(mostrarAviso);
         lblCertWarning.setManaged(mostrarAviso);
-        btnFirmar.setDisable(spinner.isVisible() || !visor.tienePaginas() || !certOk);
+
+        boolean ocupado = spinner.isVisible();
+        boolean hayPdf = visor.tienePaginas();
+        btnFirmar.setDisable(ocupado || !hayPdf || !certOk);
+        btnRechazar.setDisable(ocupado || !hayPdf);
     }
 
-    private void handleError(Throwable ex, boolean duringSign) {
+    private void handleError(Throwable ex, boolean duringAccion) {
         if (ex instanceof XnetException xe) {
             if (xe.kind() == XnetException.Kind.UNAUTHENTICATED) {
                 AppTheme.alert(Alert.AlertType.WARNING, "Tu sesion expiro. Vuelve a iniciar sesion.");
-                onDone.run();
                 close();
                 return;
             }
-            if (duringSign && xe.kind() == XnetException.Kind.CONFLICT) {
-                AppTheme.alert(Alert.AlertType.WARNING, "Este informe ya fue firmado o modificado por otra persona.");
-                onDone.run();
+            if (duringAccion && xe.kind() == XnetException.Kind.CONFLICT) {
+                AppTheme.alert(Alert.AlertType.WARNING, "Este informe ya no esta disponible para firmar o rechazar (fue firmado, rechazado o modificado por otra persona).");
                 close();
                 return;
             }

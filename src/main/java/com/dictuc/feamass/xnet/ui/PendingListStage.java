@@ -77,7 +77,7 @@ public final class PendingListStage extends Stage {
 
         btnRevisar.getStyleClass().add("button-primario");
         btnRevisar.setDisable(true);
-        btnRevisar.setOnAction(e -> abrirRevision());
+        btnRevisar.setOnAction(e -> abrirRevisionSecuencial());
 
         btnActualizar.getStyleClass().add("button-secundario");
         btnActualizar.setOnAction(e -> cargarPendientes());
@@ -249,11 +249,11 @@ public final class PendingListStage extends Stage {
         new Thread(task, "xnet-pendientes").start();
     }
 
-    private void abrirRevision() {
-        InformeSummary sel = table.getSelectionModel().getSelectedItem();
-        if (sel == null) return;
-        new ReviewSignStage(appOwner, session, sel, cachedCerts, firmaImagenPropia,
-                posicionPreferida, p -> posicionPreferida = p, this::cargarPendientes).show();
+    private void abrirRevisionSecuencial() {
+        List<InformeSummary> seleccion = new ArrayList<>(table.getSelectionModel().getSelectedItems());
+        if (seleccion.isEmpty()) return;
+        RevisionSecuencial.iniciar(appOwner, session, seleccion, cachedCerts, firmaImagenPropia,
+                posicionPreferida, p -> posicionPreferida = p, this::cargarPendientes);
     }
 
     private void firmarSeleccionados() {
@@ -355,7 +355,8 @@ public final class PendingListStage extends Stage {
 
     private void actualizarBotones() {
         int seleccionados = table.getSelectionModel().getSelectedItems().size();
-        btnRevisar.setDisable(ocupado || seleccionados != 1);
+        btnRevisar.setDisable(ocupado || seleccionados == 0);
+        btnRevisar.setText(seleccionados <= 1 ? "Revisar y firmar" : "Revisar y firmar (" + seleccionados + ")");
 
         CertInfo cert = cboCertBulk.getSelectionModel().getSelectedItem();
         boolean certOk = cert != null && cert.esValido();

@@ -26,6 +26,8 @@ class XnetClientTest {
     private HttpServer server;
     private String ultimoCsrfRecibido;
     private String ultimoBodyFirmar;
+    private String ultimoCsrfRechazar;
+    private String ultimoBodyRechazar;
 
     @BeforeEach
     void iniciarServidor() throws Exception {
@@ -53,6 +55,13 @@ class XnetClientTest {
                 ultimoBodyFirmar = leerBody(exchange);
                 long id = Long.parseLong(path.substring("/informes/".length(), path.length() - "/firmar".length()));
                 responder(exchange, 200, "{\"id\":" + id + ",\"estado\":\"no_disponible\"}");
+                return;
+            }
+            if (path.endsWith("/rechazar")) {
+                ultimoCsrfRechazar = exchange.getRequestHeaders().getFirst("X-CSRF-Token");
+                ultimoBodyRechazar = leerBody(exchange);
+                long id = Long.parseLong(path.substring("/informes/".length(), path.length() - "/rechazar".length()));
+                responder(exchange, 200, "{\"id\":" + id + ",\"estado\":\"rechazado\"}");
                 return;
             }
             responder(exchange, 404, "{\"error\":\"No encontrado.\"}");
@@ -120,5 +129,17 @@ class XnetClientTest {
         assertTrue(ultimoBodyFirmar.contains("filename=\"firmado.pdf\""));
         assertTrue(ultimoBodyFirmar.contains("Content-Type: application/pdf"));
         assertTrue(ultimoBodyFirmar.contains("contenido de prueba"));
+    }
+
+    @Test
+    void rechazarEnviaJsonYCsrfYParseaLaRespuesta() throws Exception {
+        XnetClient client = new XnetClient();
+
+        var resp = client.rechazar(777, "csrf-de-prueba", "El PDF tiene un error de calculo.");
+
+        assertEquals(777, resp.id);
+        assertEquals("rechazado", resp.estado);
+        assertEquals("csrf-de-prueba", ultimoCsrfRechazar);
+        assertTrue(ultimoBodyRechazar.contains("\"justificacion\":\"El PDF tiene un error de calculo.\""));
     }
 }

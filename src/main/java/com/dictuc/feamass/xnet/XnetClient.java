@@ -5,6 +5,7 @@ import com.dictuc.feamass.xnet.model.FirmarResponseDto;
 import com.dictuc.feamass.xnet.model.InformeSummary;
 import com.dictuc.feamass.xnet.model.LoginRequestDto;
 import com.dictuc.feamass.xnet.model.LoginResponseDto;
+import com.dictuc.feamass.xnet.model.RechazarRequestDto;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -121,6 +122,27 @@ public final class XnetClient {
             byte[] body = buildMultipartPdf(boundary, "archivo_firmado", "firmado.pdf", pdfFirmado);
             HttpRequest req = requestBuilder("/informes/" + informeId + "/firmar")
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .header("X-CSRF-Token", csrfToken)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                    .build();
+            HttpResponse<byte[]> resp = send(req);
+            checkStatus(resp);
+            return mapper.readValue(resp.body(), FirmarResponseDto.class);
+        } catch (IOException | InterruptedException e) {
+            throw networkError(e);
+        }
+    }
+
+    /**
+     * El firmante rechaza el informe al revisarlo (encontro un error en el PDF) en vez de
+     * firmarlo. Es terminal en el backend: el informe queda en estado "rechazado" y no vuelve
+     * solo a la cola de firma (ver InformeEstadoService::rechazar en el backend).
+     */
+    public FirmarResponseDto rechazar(long informeId, String csrfToken, String justificacion) throws XnetException {
+        try {
+            byte[] body = mapper.writeValueAsBytes(new RechazarRequestDto(justificacion));
+            HttpRequest req = requestBuilder("/informes/" + informeId + "/rechazar")
+                    .header("Content-Type", "application/json")
                     .header("X-CSRF-Token", csrfToken)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();

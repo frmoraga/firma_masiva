@@ -1,10 +1,14 @@
 package com.dictuc.feamass;
 
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
@@ -15,6 +19,7 @@ import javafx.stage.Window;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Tema visual compartido por todas las ventanas de la app (local y XNET). */
 public final class AppTheme {
@@ -96,6 +101,39 @@ public final class AppTheme {
         apply(alert.getDialogPane().getScene());
         aplicarIconoVentana(alert.getDialogPane().getScene().getWindow());
         return alert.showAndWait().filter(b -> b == ButtonType.YES).isPresent();
+    }
+
+    /**
+     * Pide un texto libre (ej. la justificacion de un rechazo) en un dialogo con el mismo tema
+     * visual. Usa TextArea (no el TextInputDialog de una sola linea que trae JavaFX) porque una
+     * justificacion suele necesitar mas de una linea. Devuelve vacio si se cancela o si el texto
+     * queda en blanco tras trim().
+     */
+    public static Optional<String> pedirTexto(String titulo, String mensaje) {
+        Dialog<String> dialog = new Dialog<>();
+        dialog.setTitle(titulo);
+        dialog.setHeaderText(null);
+
+        ButtonType btnAceptar = new ButtonType("Aceptar", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(btnAceptar, ButtonType.CANCEL);
+
+        TextArea texto = new TextArea();
+        texto.setWrapText(true);
+        texto.setPrefRowCount(4);
+        texto.setPrefWidth(380);
+
+        VBox contenido = new VBox(8, etiqueta(mensaje), texto);
+        contenido.setPadding(new Insets(4, 0, 0, 0));
+        dialog.getDialogPane().setContent(contenido);
+
+        apply(dialog.getDialogPane().getScene());
+        aplicarIconoVentana(dialog.getDialogPane().getScene().getWindow());
+
+        dialog.setResultConverter(boton -> boton == btnAceptar ? texto.getText() : null);
+
+        return dialog.showAndWait()
+                .map(String::trim)
+                .filter(t -> !t.isEmpty());
     }
 
     private static void aplicarIconoVentana(Window window) {
