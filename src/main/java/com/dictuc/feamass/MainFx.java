@@ -336,7 +336,11 @@ public class MainFx extends Application {
             return;
         }
 
-        String resumen = rbPdf.isSelected()
+        // Capturado en el hilo de FX (no leido despues desde el hilo de fondo del Task, que
+        // viola el contrato de JavaFX de no tocar nodos de UI fuera del hilo de aplicacion).
+        boolean firmarPdfUnico = rbPdf.isSelected();
+
+        String resumen = firmarPdfUnico
                 ? "Vas a firmar el PDF:\n" + in.getName()
                 : "Vas a firmar los PDFs contenidos en el ZIP:\n" + in.getName();
         boolean confirmado = AppTheme.confirmar(resumen + "\n\nCertificado: " + sel + "\n\n¿Confirmas la firma?");
@@ -344,6 +348,16 @@ public class MainFx extends Application {
             appendLog("[*] Firma cancelada por el usuario.");
             return;
         }
+
+        // Sin este guardado, un doble click (o un click mientras un ZIP grande todavia se
+        // esta firmando) lanza un segundo Task concurrente que abre su propio
+        // FileOutputStream sobre el MISMO archivo de salida -- dos hilos escribiendo a la vez
+        // pueden corromper el PDF/ZIP firmado resultante. Los mismos controles que podrian
+        // cambiar el modo/certificado a mitad de camino tambien se bloquean.
+        btnSign.setDisable(true);
+        rbPdf.setDisable(true);
+        rbZip.setDisable(true);
+        cboCerts.setDisable(true);
 
         // Firma en 2do plano para no congelar UI
         Task<Void> signTask = new Task<>() {
@@ -354,7 +368,7 @@ public class MainFx extends Application {
                     appendLog("[*] Preparando clave/certificado…");
                     KeyAndCert kc = CertLoader.toKeyAndCert(sel, null); // pide PIN si lo necesitas
 
-                    if (rbPdf.isSelected()) {
+                    if (firmarPdfUnico) {
                         appendLog("[*] Firmando PDF único…");
                         PdfSigner.signSingle(in, out, kc);
                         appendLog("[OK] PDF firmado: " + out.getAbsolutePath());
@@ -377,11 +391,19 @@ public class MainFx extends Application {
         signTask.setOnSucceeded(ev -> {
             progressBar.progressProperty().unbind();
             progressBar.setProgress(0);
+            btnSign.setDisable(false);
+            rbPdf.setDisable(false);
+            rbZip.setDisable(false);
+            cboCerts.setDisable(false);
             alert(Alert.AlertType.INFORMATION, "Proceso de firma finalizado.");
         });
         signTask.setOnFailed(ev -> {
             progressBar.progressProperty().unbind();
             progressBar.setProgress(0);
+            btnSign.setDisable(false);
+            rbPdf.setDisable(false);
+            rbZip.setDisable(false);
+            cboCerts.setDisable(false);
             var ex = signTask.getException();
             ActivityLog.registrar("Firma local ERROR entrada=" + in.getName() + " cert=" + sel.alias
                     + " " + (ex != null ? ex.getMessage() : ""));
@@ -389,7 +411,9 @@ public class MainFx extends Application {
             if (ex != null) ex.printStackTrace();
         });
 
-        new Thread(signTask, "sign-task").start();
+        Thread hilo = new Thread(signTask, "sign-task");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void refreshCertsAsync() {
@@ -422,7 +446,9 @@ public class MainFx extends Application {
             progressBar.setProgress(0);
         });
 
-        new Thread(task, "cert-refresh").start();
+        Thread hilo = new Thread(task, "cert-refresh");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     // ---------- Utilidades ----------

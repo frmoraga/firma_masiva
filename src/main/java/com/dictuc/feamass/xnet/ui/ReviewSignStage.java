@@ -6,6 +6,7 @@ import com.dictuc.feamass.KeyAndCert;
 import com.dictuc.feamass.PdfSigner;
 import com.dictuc.feamass.certs.CertInfo;
 import com.dictuc.feamass.certs.CertLoader;
+import com.dictuc.feamass.certs.RutMatcher;
 import com.dictuc.feamass.xnet.XnetConfig;
 import com.dictuc.feamass.xnet.XnetException;
 import com.dictuc.feamass.xnet.XnetSession;
@@ -62,6 +63,14 @@ public final class ReviewSignStage extends Stage {
     private final ProgressIndicator spinner = new ProgressIndicator();
 
     private Task<?> currentTask;
+    // true solo mientras firmarYSubir()/rechazarInforme() tienen una request mutante en vuelo
+    // (nunca durante la carga inicial de la vista previa, que es segura de abandonar). Cancelar
+    // un Task cuyo call() esta bloqueado en una llamada HTTP sincrona no "desenvia" una request
+    // que el servidor ya recibio y proceso -- por eso la X nativa de la ventana no puede
+    // simplemente cerrar en este estado, o el usuario queda sin saber si la firma/rechazo
+    // realmente se aplico, y RevisionSecuencial trataria el cierre como una cancelacion
+    // silenciosa, cortando el resto del lote sin avisar.
+    private boolean accionEnCurso = false;
     private final java.util.function.Consumer<PdfSigner.PosicionSello> onPosicionCambiada;
 
     public ReviewSignStage(Stage appOwner, XnetSession session, InformeSummary informe,
@@ -161,6 +170,12 @@ public final class ReviewSignStage extends Stage {
         setScene(scene);
 
         setOnCloseRequest(ev -> {
+            if (accionEnCurso) {
+                ev.consume();
+                AppTheme.alert(Alert.AlertType.WARNING,
+                        "Espera a que termine de firmar/rechazar antes de cerrar esta ventana.");
+                return;
+            }
             if (currentTask != null) currentTask.cancel();
             originalPdfBytes = null;
             visor.limpiar();
@@ -193,7 +208,9 @@ public final class ReviewSignStage extends Stage {
             setBusy(false, "");
             handleError(task.getException(), false);
         });
-        new Thread(task, "xnet-preview").start();
+        Thread hilo = new Thread(task, "xnet-preview");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void firmarYSubir() {
@@ -211,9 +228,15 @@ public final class ReviewSignStage extends Stage {
             return;
         }
 
+        String advertenciaRut = RutMatcher.pareceNoCoincidir(sel.cert, session.rutUsuario(), session.correoUsuario())
+                ? "\n\n⚠ ADVERTENCIA: este certificado no parece corresponder a tu sesion ("
+                        + session.rutUsuario() + " / " + session.correoUsuario() + "). XNET registrara "
+                        + "esta firma a tu nombre igual, aunque la firma legal del PDF quedara a nombre "
+                        + "de otra persona. Verifica el certificado antes de continuar."
+                : "";
         boolean confirmado = AppTheme.confirmar(
                 "Vas a firmar el informe #" + informe.id + " (solicitante " + informe.rutSolicitante + ")\n"
-                        + "con el certificado:\n" + sel + "\n\n¿Confirmas la firma?");
+                        + "con el certificado:\n" + sel + advertenciaRut + "\n\n¿Confirmas la firma?");
         if (!confirmado) {
             return;
         }
@@ -227,6 +250,7 @@ public final class ReviewSignStage extends Stage {
         PdfSigner.SelloVisual selloFinal = sello;
 
         setBusy(true, "Firmando y enviando a XNET…");
+        accionEnCurso = true;
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -238,6 +262,7 @@ public final class ReviewSignStage extends Stage {
         };
         currentTask = task;
         task.setOnSucceeded(ev -> {
+            accionEnCurso = false;
             setBusy(false, "");
             originalPdfBytes = null;
             visor.limpiar();
@@ -246,13 +271,16 @@ public final class ReviewSignStage extends Stage {
             close();
         });
         task.setOnFailed(ev -> {
+            accionEnCurso = false;
             setBusy(false, "");
             Throwable ex = task.getException();
             ActivityLog.registrar("Firma XNET ERROR informe #" + informe.id + " cert=" + sel.alias
                     + " " + (ex != null ? ex.getMessage() : ""));
             handleError(ex, true);
         });
-        new Thread(task, "xnet-firmar").start();
+        Thread hilo = new Thread(task, "xnet-firmar");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void rechazarInforme() {
@@ -270,6 +298,7 @@ public final class ReviewSignStage extends Stage {
         String motivo = justificacion.get();
 
         setBusy(true, "Rechazando y notificando a XNET…");
+        accionEnCurso = true;
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -279,6 +308,7 @@ public final class ReviewSignStage extends Stage {
         };
         currentTask = task;
         task.setOnSucceeded(ev -> {
+            accionEnCurso = false;
             setBusy(false, "");
             originalPdfBytes = null;
             visor.limpiar();
@@ -287,13 +317,16 @@ public final class ReviewSignStage extends Stage {
             close();
         });
         task.setOnFailed(ev -> {
+            accionEnCurso = false;
             setBusy(false, "");
             Throwable ex = task.getException();
             ActivityLog.registrar("Rechazo XNET ERROR informe #" + informe.id
                     + " " + (ex != null ? ex.getMessage() : ""));
             handleError(ex, true);
         });
-        new Thread(task, "xnet-rechazar").start();
+        Thread hilo = new Thread(task, "xnet-rechazar");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void setBusy(boolean busy, String status) {

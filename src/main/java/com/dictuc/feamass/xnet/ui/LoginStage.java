@@ -104,8 +104,7 @@ public final class LoginStage extends Stage {
             protected XnetSession call() throws Exception {
                 XnetClient client = new XnetClient();
                 LoginResponseDto resp = client.login(email, password);
-                return new XnetSession(client, resp.csrfToken,
-                        resp.usuario.id, resp.usuario.rut, resp.usuario.nombre);
+                return new XnetSession(client, resp.csrfToken, resp.usuario.rut, resp.usuario.nombre, resp.usuario.email);
             }
         };
 
@@ -125,6 +124,8 @@ public final class LoginStage extends Stage {
             lblError.setText(ex != null ? ex.getMessage() : "No fue posible iniciar sesion.");
         });
 
-        new Thread(task, "xnet-login").start();
+        Thread hilo = new Thread(task, "xnet-login");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 }

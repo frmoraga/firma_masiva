@@ -9,16 +9,16 @@ public final class XnetSession {
 
     private final XnetClient client;
     private final String csrfToken;
-    private final long usuarioDictucId;
     private final String rutUsuario;
     private final String nombreUsuario;
+    private final String correoUsuario;
 
-    public XnetSession(XnetClient client, String csrfToken, long usuarioDictucId, String rutUsuario, String nombreUsuario) {
+    public XnetSession(XnetClient client, String csrfToken, String rutUsuario, String nombreUsuario, String correoUsuario) {
         this.client = client;
         this.csrfToken = csrfToken;
-        this.usuarioDictucId = usuarioDictucId;
         this.rutUsuario = rutUsuario;
         this.nombreUsuario = nombreUsuario;
+        this.correoUsuario = correoUsuario;
     }
 
     public XnetClient client() {
@@ -29,15 +29,15 @@ public final class XnetSession {
         return csrfToken;
     }
 
-    public long usuarioDictucId() {
-        return usuarioDictucId;
-    }
-
     public String rutUsuario() {
         return rutUsuario;
     }
 
     public String nombreUsuario() {
         return nombreUsuario;
+    }
+
+    public String correoUsuario() {
+        return correoUsuario;
     }
 }

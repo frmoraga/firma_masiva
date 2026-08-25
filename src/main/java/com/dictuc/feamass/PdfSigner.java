@@ -432,6 +432,26 @@ public final class PdfSigner {
         return baos.toByteArray();
     }
 
+    /**
+     * Nombre de algoritmo JCA para firmar, segun el tipo de llave. NO alcanza con concatenar
+     * "SHA256with" + privateKey.getAlgorithm(): para una llave EC, getAlgorithm() devuelve "EC"
+     * (el nombre JCA del tipo de llave), pero ningun proveedor (SunEC, SunMSCAPI, SunPKCS11)
+     * registra un algoritmo de firma bajo "SHA256withEC" -- el nombre correcto es
+     * "SHA256withECDSA". Con la concatenacion, cualquier certificado respaldado por una llave EC
+     * (posible via Windows-MY o un token PKCS#11) fallaba SIEMPRE al firmar con
+     * NoSuchAlgorithmException, sin que ningun test lo detectara (los tests solo usan RSA).
+     */
+    private static String algoritmoFirma(PrivateKey privateKey) throws java.security.NoSuchAlgorithmException {
+        String tipoLlave = privateKey.getAlgorithm();
+        return switch (tipoLlave) {
+            case "RSA" -> "SHA256withRSA";
+            case "EC", "ECDSA" -> "SHA256withECDSA";
+            case "DSA" -> "SHA256withDSA";
+            default -> throw new java.security.NoSuchAlgorithmException(
+                    "Tipo de llave no soportado para firmar: " + tipoLlave);
+        };
+    }
+
     private static byte[] cmsSign(byte[] toBeSigned,
                                   PrivateKey privateKey,
                                   java.security.cert.Certificate[] chain,
@@ -440,8 +460,7 @@ public final class PdfSigner {
         for (java.security.cert.Certificate c : chain) certs.add((X509Certificate) c);
         X509Certificate signerCert = certs.get(0);
 
-        String algo = "SHA256with" + privateKey.getAlgorithm(); // RSA / EC / etc.
-        ContentSigner signer = new JcaContentSignerBuilder(algo).build(privateKey);
+        ContentSigner signer = new JcaContentSignerBuilder(algoritmoFirma(privateKey)).build(privateKey);
 
         var digestProvider = new JcaDigestCalculatorProviderBuilder().build();
         var sigInfo = new JcaSignerInfoGeneratorBuilder(digestProvider).build(signer, signerCert);

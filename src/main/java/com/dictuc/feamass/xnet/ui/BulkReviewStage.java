@@ -2,6 +2,7 @@ package com.dictuc.feamass.xnet.ui;
 
 import com.dictuc.feamass.AppTheme;
 import com.dictuc.feamass.certs.CertInfo;
+import com.dictuc.feamass.certs.RutMatcher;
 import com.dictuc.feamass.xnet.XnetConfig;
 import com.dictuc.feamass.xnet.XnetSession;
 import com.dictuc.feamass.xnet.model.InformeSummary;
@@ -70,6 +71,28 @@ final class BulkReviewStage extends Stage {
     private Task<?> tareaActual;
     private boolean confirmado = false;
 
+    /**
+     * Advertencia visible (no bloqueante) si el certificado elegido no parece corresponder
+     * al RUT de la sesion XNET activa -- ver RutMatcher y Hallazgo S-1 de
+     * AUDITORIA_SEGURIDAD_FASE2.md. Devuelve un Label vacio (sin ocupar espacio) si coincide
+     * o si no se pudo determinar.
+     */
+    private static Label advertenciaRut(XnetSession session, CertInfo cert) {
+        Label lbl = new Label();
+        if (cert != null && RutMatcher.pareceNoCoincidir(cert.cert, session.rutUsuario(), session.correoUsuario())) {
+            lbl.setText("⚠ Este certificado no parece corresponder a tu sesion ("
+                    + session.rutUsuario() + " / " + session.correoUsuario() + "). La firma legal del "
+                    + "PDF quedara a nombre de otra persona aunque XNET la registre a tu nombre. "
+                    + "Verifica antes de continuar.");
+            lbl.setWrapText(true);
+            lbl.setStyle("-fx-text-fill: #b91c1c; -fx-font-weight: bold;");
+        } else {
+            lbl.setManaged(false);
+            lbl.setVisible(false);
+        }
+        return lbl;
+    }
+
     /** Abre la confirmacion en modo modal. Devuelve true solo si el usuario acepta firmar. */
     static boolean confirmar(Stage owner, XnetSession session, List<InformeSummary> informes, CertInfo cert) {
         BulkReviewStage ventana = new BulkReviewStage(owner, session, informes, cert);
@@ -126,6 +149,7 @@ final class BulkReviewStage extends Stage {
         VBox body = new VBox(12,
                 AppTheme.tituloSeccion("Vas a firmar " + informes.size() + " informe(s)"),
                 AppTheme.etiqueta("Certificado: " + cert),
+                advertenciaRut(session, cert),
                 AppTheme.etiqueta("Selecciona un informe de la lista para ver su contenido antes de firmar. "
                         + "Una vez confirmada, la firma se aplica y se sube a XNET informe por informe."),
                 centro,
@@ -219,7 +243,9 @@ final class BulkReviewStage extends Stage {
                     + (ex != null ? ex.getMessage() : "error desconocido")
                     + ". Puedes firmar igual, pero no habras revisado este documento.");
         });
-        new Thread(task, "xnet-preview-masiva").start();
+        Thread hilo = new Thread(task, "xnet-preview-masiva");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void actualizarRevisados() {

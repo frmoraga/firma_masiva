@@ -176,7 +176,9 @@ public final class PendingListStage extends Stage {
             // Best-effort: si falla la descarga, se sigue firmando sin sello visual.
             firmaImagenPropia = null;
         });
-        new Thread(task, "xnet-firma-imagen").start();
+        Thread hilo = new Thread(task, "xnet-firma-imagen");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private static javafx.scene.layout.Region spacer() {
@@ -246,7 +248,9 @@ public final class PendingListStage extends Stage {
             setBusy(false);
             handleError(task.getException());
         });
-        new Thread(task, "xnet-pendientes").start();
+        Thread hilo = new Thread(task, "xnet-pendientes");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void abrirRevisionSecuencial() {
@@ -318,7 +322,9 @@ public final class PendingListStage extends Stage {
             setBusy(false);
             handleError(task.getException());
         });
-        new Thread(task, "xnet-firmar-masivo").start();
+        Thread hilo = new Thread(task, "xnet-firmar-masivo");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void cerrarSesion() {
@@ -335,7 +341,9 @@ public final class PendingListStage extends Stage {
         };
         task.setOnSucceeded(ev -> volverALogin());
         task.setOnFailed(ev -> volverALogin());
-        new Thread(task, "xnet-logout").start();
+        Thread hilo = new Thread(task, "xnet-logout");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     private void volverALogin() {

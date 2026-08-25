@@ -98,9 +98,18 @@ final class RevisionSecuencial {
     private void finalizar() {
         // Solo el resumen final si de verdad fue un lote (>1): para una seleccion de 1 informe,
         // ReviewSignStage ya no muestra nada especifico y no hace falta un segundo popup.
-        if (totalSeleccionado > 1 && (firmados + rechazados) > 0) {
-            AppTheme.alert(Alert.AlertType.INFORMATION,
-                    firmados + " informe(s) firmado(s), " + rechazados + " rechazado(s).");
+        if (totalSeleccionado > 1) {
+            int pendientes = totalSeleccionado - firmados - rechazados;
+            String mensaje = firmados + " informe(s) firmado(s), " + rechazados + " rechazado(s).";
+            // Sin este aviso, si la cadena se corta en el primer informe (sesion expirada,
+            // usuario cierra esa ventana) firmados+rechazados queda en 0 y el usuario no se
+            // entera de que el resto de la seleccion nunca se llego a revisar -- parece que
+            // "no paso nada" en vez de que el lote se detuvo a mitad de camino.
+            if (pendientes > 0) {
+                mensaje += "\n" + pendientes + " informe(s) seleccionados no se revisaron "
+                        + "(la revision se detuvo antes de completar el lote).";
+            }
+            AppTheme.alert(Alert.AlertType.INFORMATION, mensaje);
         }
         alTerminar.run();
     }

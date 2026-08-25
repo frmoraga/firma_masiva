@@ -9,7 +9,7 @@
   <properties>
     <maven.compiler.source>17</maven.compiler.source>
     <maven.compiler.target>17</maven.compiler.target>
-    <javafx.version>21.0.3</javafx.version>
+    <javafx.version>21.0.9</javafx.version>
     <pdfbox.version>2.0.30</pdfbox.version>
     <bc.version>1.78.1</bc.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
